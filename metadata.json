@@ -1,0 +1,6 @@
+{
+  "name": "markitABLE",
+  "description": "A marketing copy and strategy tool that transforms ideas into high-conversion copy, marketing plans, and podcast outreach kits using the Big 3 framework.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
