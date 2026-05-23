@@ -1,39 +1,33 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
-  Sparkles, Download, Podcast, Lightbulb, Menu, Plus, FileText, Trash2, LogIn, LogOut, Image as ImageIcon, X, Sliders, Terminal, Activity, CheckCircle2
+  Sparkles, Download, Podcast, Lightbulb, Menu, Plus, FileText, Trash2, Image as ImageIcon, X, Sliders, Terminal, Activity, CheckCircle2
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import { Project, Note, MarketType, TacticalAssetTarget } from './types';
-import { auth, db, storage, handleFirestoreError, OperationType, sanitizeData } from './lib/firebase';
-import { 
-  signInWithPopup, 
-  signInWithRedirect,
-  GoogleAuthProvider, 
-  onAuthStateChanged, 
-  signOut,
-  User
-} from 'firebase/auth';
-import { 
-  collection, 
-  query, 
-  where, 
-  onSnapshot, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  doc, 
-  setDoc,
-  orderBy,
-  serverTimestamp
-} from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 const generateId = () => Math.random().toString(36).substring(2, 9);
 const assetTargetLabels: Record<TacticalAssetTarget, string> = {
   socialMediaBio: 'Social Media Bio',
   pressRelease: 'Press Release',
 };
+const projectsStorageKey = 'markitable-projects';
+const activeProjectStorageKey = 'markitable-active-project';
+
+function readProjectsFromStorage(): Project[] {
+  if (typeof window === 'undefined') return [];
+
+  try {
+    const stored = window.localStorage.getItem(projectsStorageKey);
+    if (!stored) return [];
+
+    const parsed = JSON.parse(stored);
+    return Array.isArray(parsed) ? parsed as Project[] : [];
+  } catch (error) {
+    console.error('Failed to read local projects:', error);
+    return [];
+  }
+}
 
 // Error Boundary Component
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: any }> {
@@ -77,153 +71,73 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
 }
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 768);
-  const [isAuthReady, setIsAuthReady] = useState(false);
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
+  const [isAppReady, setIsAppReady] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
-      if (user) {
-        setAuthError(null);
-      }
-      setIsAuthReady(true);
-    });
-    return () => unsubscribe();
+    const storedProjects = readProjectsFromStorage()
+      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    const storedActiveProjectId = window.localStorage.getItem(activeProjectStorageKey);
+
+    setProjects(storedProjects);
+    setActiveProjectId(
+      storedActiveProjectId && storedProjects.some((project) => project.id === storedActiveProjectId)
+        ? storedActiveProjectId
+        : null
+    );
+    setIsAppReady(true);
   }, []);
 
   useEffect(() => {
-    if (!user) {
-      setProjects([]);
-      return;
+    if (!isAppReady) return;
+
+    window.localStorage.setItem(projectsStorageKey, JSON.stringify(projects));
+  }, [projects, isAppReady]);
+
+  useEffect(() => {
+    if (!isAppReady) return;
+
+    if (activeProjectId) {
+      window.localStorage.setItem(activeProjectStorageKey, activeProjectId);
+    } else {
+      window.localStorage.removeItem(activeProjectStorageKey);
     }
-
-    const q = query(
-      collection(db, 'projects'), 
-      where('ownerId', '==', user.uid),
-      orderBy('updatedAt', 'desc')
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const projectsData = snapshot.docs.map(doc => ({
-        ...doc.data(),
-        id: doc.id
-      })) as Project[];
-      setProjects(projectsData);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'projects');
-    });
-
-    return () => unsubscribe();
-  }, [user]);
+  }, [activeProjectId, isAppReady]);
 
   const activeProject = projects.find(p => p.id === activeProjectId);
 
-  const handleLogin = async () => {
-    if (isLoggingIn) return;
-    setIsLoggingIn(true);
-    setAuthError(null);
-
-    const provider = new GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: 'select_account' });
-
-    const isMobileLikeViewport = window.matchMedia('(pointer: coarse)').matches;
-    const isIOS = /iPad|iPhone|iPod/.test(window.navigator.userAgent);
-
-    try {
-      if (isMobileLikeViewport || isIOS) {
-        await signInWithRedirect(auth, provider);
-        return;
-      }
-
-      await signInWithPopup(auth, provider);
-    } catch (error: any) {
-      const errorCode = error?.code;
-
-      if (errorCode === 'auth/cancelled-popup-request' || errorCode === 'auth/popup-closed-by-user') {
-        return;
-      }
-
-      if (
-        errorCode === 'auth/popup-blocked' ||
-        errorCode === 'auth/operation-not-supported-in-this-environment' ||
-        errorCode === 'auth/web-storage-unsupported'
-      ) {
-        await signInWithRedirect(auth, provider);
-        return;
-      }
-
-      if (errorCode === 'auth/unauthorized-domain') {
-        setAuthError(
-          `This domain is not authorized in Firebase Auth yet. Add ${window.location.hostname} to Authentication > Settings > Authorized domains.`
-        );
-        console.error("Login Error:", error);
-        return;
-      }
-
-      setAuthError('Google sign-in failed. Check the Firebase Auth provider, authorized domains, and deployed environment variables.');
-      console.error("Login Error:", error);
-    } finally {
-      setIsLoggingIn(false);
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      setActiveProjectId(null);
-    } catch (error) {
-      console.error("Logout Error:", error);
-    }
-  };
-
-  const createProject = async (name: string) => {
-    if (!user) return;
-    const projectRef = doc(collection(db, 'projects'));
+  const createProject = (name: string) => {
+    const projectId = generateId();
     const newProject: Project = {
-      id: projectRef.id,
+      id: projectId,
       name,
       marketType: 'niche',
       notes: [],
       kit: null,
-      ownerId: user.uid,
       createdAt: Date.now(),
       updatedAt: Date.now()
     };
-    try {
-      await setDoc(projectRef, newProject);
-      setActiveProjectId(projectRef.id);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, `projects/${projectRef.id}`);
-    }
+
+    setProjects((currentProjects) => [newProject, ...currentProjects]);
+    setActiveProjectId(projectId);
   };
 
-  const updateProject = async (id: string, updates: Partial<Project>) => {
-    if (!user) return;
-    try {
-      const projectRef = doc(db, 'projects', id);
-      const sanitizedUpdates = sanitizeData(updates);
-      await updateDoc(projectRef, { ...sanitizedUpdates, updatedAt: Date.now() });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `projects/${id}`);
-    }
+  const updateProject = (id: string, updates: Partial<Project>) => {
+    setProjects((currentProjects) =>
+      currentProjects
+        .map((project) => project.id === id ? { ...project, ...updates, updatedAt: Date.now() } : project)
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+    );
   };
 
-  const deleteProject = async (id: string) => {
-    if (!user) return;
-    try {
-      await deleteDoc(doc(db, 'projects', id));
-      if (activeProjectId === id) setActiveProjectId(null);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `projects/${id}`);
-    }
+  const deleteProject = (id: string) => {
+    setProjects((currentProjects) => currentProjects.filter((project) => project.id !== id));
+    if (activeProjectId === id) setActiveProjectId(null);
   };
 
-  if (!isAuthReady) {
+  if (!isAppReady) {
     return (
       <div className="min-h-screen bg-paper flex items-center justify-center">
         <motion.div
@@ -251,30 +165,9 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            {user ? (
-              <div className="flex items-center gap-4">
-                <img src={user.photoURL || ''} alt={user.displayName || ''} className="w-8 h-8 rounded-full border border-ink/10" />
-                <button onClick={handleLogout} className="text-[10px] font-bold uppercase tracking-widest hover:text-accent transition-colors flex items-center gap-2">
-                  <LogOut className="w-4 h-4" /> Sign Out
-                </button>
-              </div>
-            ) : (
-              <button 
-                onClick={handleLogin} 
-                disabled={isLoggingIn}
-                className="text-[10px] font-bold uppercase tracking-widest hover:text-accent transition-colors flex items-center gap-2 disabled:opacity-50"
-              >
-                {isLoggingIn ? (
-                  <>
-                    <Activity className="w-4 h-4 animate-pulse" /> Connecting...
-                  </>
-                ) : (
-                  <>
-                    <LogIn className="w-4 h-4" /> Sign In
-                  </>
-                )}
-              </button>
-            )}
+            <span className="hidden sm:block text-[10px] font-bold uppercase tracking-widest text-ink/40">
+              Local Browser Mode
+            </span>
             <span className="text-[10px] font-bold uppercase tracking-widest hidden sm:block">Vol. 1</span>
           </div>
         </nav>
@@ -303,88 +196,74 @@ export default function App() {
                 transition={{ type: "spring", bounce: 0, duration: 0.3 }}
                 className="fixed md:relative z-40 md:z-auto top-16 md:top-0 left-0 border-r border-ink/10 bg-paper md:bg-white/50 flex flex-col h-[calc(100vh-4rem)] overflow-hidden shrink-0"
               >
-                {user ? (
-                  <>
-                    <div className="p-6 border-b border-ink/10">
-                      <h2 className="text-[10px] font-bold uppercase tracking-[0.3em] mb-4 text-ink/40">New Project</h2>
-                      <form onSubmit={(e) => {
-                        e.preventDefault();
-                        const form = e.target as HTMLFormElement;
-                        const input = form.elements.namedItem('projectName') as HTMLInputElement;
-                        if (input.value.trim()) {
-                          createProject(input.value.trim());
-                          input.value = '';
-                        }
-                      }}>
-                        <div className="flex gap-2">
-                          <input 
-                            name="projectName"
-                            placeholder="Project Name..." 
-                            className="flex-1 bg-transparent border-b border-ink/20 py-2 text-sm font-serif focus:outline-none focus:border-accent transition-colors"
-                          />
-                          <button type="submit" className="p-2 text-ink/40 hover:text-accent transition-colors">
-                            <Plus className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </form>
-                    </div>
-                    <div className="flex-1 overflow-y-auto p-4 space-y-1">
-                      {projects.map(p => (
-                        <div 
-                          key={p.id}
-                          onClick={() => {
-                            setActiveProjectId(p.id);
-                            if (window.innerWidth < 768) setIsSidebarOpen(false);
-                          }}
-                          className={cn(
-                            "group flex items-center justify-between p-4 cursor-pointer transition-all border-l-2",
-                            activeProjectId === p.id ? "border-accent bg-ink/5" : "border-transparent hover:bg-ink/5"
-                          )}
-                        >
-                          <div className="flex items-center gap-3 overflow-hidden">
-                            <FileText className={cn("w-4 h-4 shrink-0", activeProjectId === p.id ? "text-accent" : "text-ink/30")} />
-                            <span className="font-serif italic truncate text-sm">{p.name}</span>
-                          </div>
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); deleteProject(p.id); }}
-                            className="opacity-0 group-hover:opacity-100 text-ink/20 hover:text-accent transition-all"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      ))}
-                      {projects.length === 0 && (
-                        <div className="p-8 text-center text-ink/30 text-xs font-serif italic">
-                          No projects yet. Start by creating one above.
-                        </div>
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-4">
-                    <p className="text-xs font-serif italic text-ink/40">Sign in to archive your projects in the cloud.</p>
-                    {authError && (
-                      <p className="max-w-xs text-[11px] leading-relaxed text-red-600">{authError}</p>
-                    )}
-                    <button onClick={handleLogin} className="bg-ink text-paper px-6 py-2 text-[10px] font-bold uppercase tracking-widest hover:bg-accent transition-colors">
-                      Sign In
-                    </button>
+                <>
+                  <div className="p-6 border-b border-ink/10">
+                    <h2 className="text-[10px] font-bold uppercase tracking-[0.3em] mb-2 text-ink/40">New Project</h2>
+                    <p className="text-[11px] font-serif italic text-ink/40 mb-4">
+                      Stored locally in this browser.
+                    </p>
+                    <form onSubmit={(e) => {
+                      e.preventDefault();
+                      const form = e.target as HTMLFormElement;
+                      const input = form.elements.namedItem('projectName') as HTMLInputElement;
+                      if (input.value.trim()) {
+                        createProject(input.value.trim());
+                        input.value = '';
+                      }
+                    }}>
+                      <div className="flex gap-2">
+                        <input 
+                          name="projectName"
+                          placeholder="Project Name..." 
+                          className="flex-1 bg-transparent border-b border-ink/20 py-2 text-sm font-serif focus:outline-none focus:border-accent transition-colors"
+                        />
+                        <button type="submit" className="p-2 text-ink/40 hover:text-accent transition-colors">
+                          <Plus className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </form>
                   </div>
-                )}
+                  <div className="flex-1 overflow-y-auto p-4 space-y-1">
+                    {projects.map(p => (
+                      <div 
+                        key={p.id}
+                        onClick={() => {
+                          setActiveProjectId(p.id);
+                          if (window.innerWidth < 768) setIsSidebarOpen(false);
+                        }}
+                        className={cn(
+                          "group flex items-center justify-between p-4 cursor-pointer transition-all border-l-2",
+                          activeProjectId === p.id ? "border-accent bg-ink/5" : "border-transparent hover:bg-ink/5"
+                        )}
+                      >
+                        <div className="flex items-center gap-3 overflow-hidden">
+                          <FileText className={cn("w-4 h-4 shrink-0", activeProjectId === p.id ? "text-accent" : "text-ink/30")} />
+                          <span className="font-serif italic truncate text-sm">{p.name}</span>
+                        </div>
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); deleteProject(p.id); }}
+                          className="opacity-0 group-hover:opacity-100 text-ink/20 hover:text-accent transition-all"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                    {projects.length === 0 && (
+                      <div className="p-8 text-center text-ink/30 text-xs font-serif italic">
+                        No projects yet. Start by creating one above.
+                      </div>
+                    )}
+                  </div>
+                </>
               </motion.aside>
             )}
           </AnimatePresence>
 
           {/* Main Content Area */}
           <main className="flex-1 overflow-y-auto bg-paper relative h-[calc(100vh-4rem)] w-full w-max-[100vw]">
-            {!user ? (
-              <HeroSection onLogin={handleLogin} authError={authError} />
-            ) : !activeProject ? (
+            {!activeProject ? (
               <div className="h-full flex items-center justify-center p-12">
-                <div className="text-center space-y-4">
-                  <span className="text-accent font-bold uppercase tracking-[0.4em] text-[10px]">Select a Project</span>
-                  <p className="text-2xl font-serif italic text-ink/40">Choose an existing archive or start a new one.</p>
-                </div>
+                <HeroSection />
               </div>
             ) : (
               <ProjectView project={activeProject} updateProject={updateProject} />
@@ -396,7 +275,7 @@ export default function App() {
   );
 }
 
-function HeroSection({ onLogin, authError }: { onLogin: () => void; authError: string | null }) {
+function HeroSection() {
   return (
     <section className="relative py-12 md:py-20 px-6 md:px-12 min-h-[calc(100vh-4rem)] flex items-center">
       <div className="max-w-[1000px] mx-auto w-full">
@@ -422,14 +301,17 @@ function HeroSection({ onLogin, authError }: { onLogin: () => void; authError: s
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.6 }}
-              onClick={onLogin}
+              onClick={() => {
+                const input = document.querySelector<HTMLInputElement>('input[name="projectName"]');
+                input?.focus();
+              }}
               className="bg-ink text-paper px-12 py-4 text-xs font-bold uppercase tracking-[0.3em] hover:bg-accent transition-all"
             >
-              Enter The Archives
+              Start A Local Archive
             </motion.button>
-            {authError && (
-              <p className="max-w-xl text-sm leading-relaxed text-red-600">{authError}</p>
-            )}
+            <p className="max-w-xl text-sm leading-relaxed text-ink/55">
+              Everything in this workspace now saves to your browser instead of Firebase. No login required.
+            </p>
           </motion.div>
         </div>
       </div>
@@ -450,7 +332,7 @@ function ProjectView({ project, updateProject }: { project: Project, updateProje
   const [viewMode, setViewMode] = useState<'editorial' | 'spatial'>('editorial');
   const [logs, setLogs] = useState<string[]>(() => [
     `[${new Date().toLocaleTimeString()}] MON_ENG: markitABLE spatial engine online.`,
-    `[${new Date().toLocaleTimeString()}] ARCHIVE: Synced with standard cloud Firestore collections.`,
+    `[${new Date().toLocaleTimeString()}] ARCHIVE: Local browser vault mounted successfully.`,
     `[${new Date().toLocaleTimeString()}] SYNAPSE: Active models resolved (gemini-3.5-flash). Ready for synthesis...`
   ]);
 
@@ -480,11 +362,14 @@ function ProjectView({ project, updateProject }: { project: Project, updateProje
 
     try {
       if (selectedImage) {
-        addLog(`IMAGE_UPLOAD: Shipping asset '${selectedImage.name}' to safe cloud archives...`);
-        const storageRef = ref(storage, `projects/${project.id}/${Date.now()}_${selectedImage.name}`);
-        await uploadBytes(storageRef, selectedImage);
-        imageUrl = await getDownloadURL(storageRef);
-        addLog(`IMAGE_UPLOAD: Saved. URL retrieved successfully.`);
+        addLog(`IMAGE_SAVE: Encoding asset '${selectedImage.name}' into local browser storage...`);
+        imageUrl = imagePreview || await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+          reader.onerror = () => reject(reader.error || new Error('Failed to read image file.'));
+          reader.readAsDataURL(selectedImage);
+        });
+        addLog(`IMAGE_SAVE: Embedded asset into local archive successfully.`);
       }
 
       const note: Note = {

@@ -65,7 +65,6 @@ export interface Project {
   marketType: MarketType;
   notes: Note[];
   kit: MarketingKit | null;
-  ownerId: string;
   createdAt: number;
   updatedAt: number;
   podcastProductDesc?: string;
