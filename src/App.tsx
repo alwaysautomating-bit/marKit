@@ -328,7 +328,7 @@ function ProjectView({ project, updateProject }: { project: Project, updateProje
   const [messagingTarget, setMessagingTarget] = useState('all');
   const [assetTarget, setAssetTarget] = useState<TacticalAssetTarget>('socialMediaBio');
   const [showPodcastConfig, setShowPodcastConfig] = useState(false);
-  const [activeNoteId, setActiveNoteId] = useState<string | null>(project.notes[0]?.id ?? null);
+  const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
   
   const [viewMode, setViewMode] = useState<'editorial' | 'spatial'>('editorial');
   const [logs, setLogs] = useState<string[]>(() => [
@@ -344,6 +344,19 @@ function ProjectView({ project, updateProject }: { project: Project, updateProje
 
   const resultRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const hasGeneratedKitContent = Boolean(
+    project.kit && (
+      project.kit.headline ||
+      project.kit.subheadline ||
+      project.kit.valueProposition ||
+      project.kit.marketingPlan?.length ||
+      project.kit.suggestions?.length ||
+      (project.kit.coreMessaging && Object.keys(project.kit.coreMessaging).length > 0) ||
+      (project.kit.tacticalAssets && Object.keys(project.kit.tacticalAssets).length > 0) ||
+      project.kit.podcastMatches?.length
+    )
+  );
+  const showEditorialResultsColumn = Boolean(loadingSection || hasGeneratedKitContent);
 
   useEffect(() => {
     if (project.notes.length === 0) {
@@ -351,8 +364,8 @@ function ProjectView({ project, updateProject }: { project: Project, updateProje
       return;
     }
 
-    if (!activeNoteId || !project.notes.some((note) => note.id === activeNoteId)) {
-      setActiveNoteId(project.notes[0].id);
+    if (activeNoteId && !project.notes.some((note) => note.id === activeNoteId)) {
+      setActiveNoteId(null);
     }
   }, [project.notes, activeNoteId]);
 
@@ -392,6 +405,7 @@ function ProjectView({ project, updateProject }: { project: Project, updateProje
       if (imageUrl) note.imageUrl = imageUrl;
       
       updateProject(project.id, { notes: [note, ...project.notes] });
+      setActiveNoteId(null);
       addLog(`INFLOW: Dumped manuscript entry (ID: ${note.id.substring(0,6)}). Processing relational schema...`);
       setNewNote('');
       setSelectedImage(null);
@@ -857,7 +871,7 @@ function ProjectView({ project, updateProject }: { project: Project, updateProje
       {viewMode === 'editorial' ? (
         <div className="editorial-grid">
           {/* Left Column: Notes Collection */}
-        <div className="col-span-12 lg:col-span-5 space-y-12">
+        <div className={cn("col-span-12 space-y-12", showEditorialResultsColumn ? "lg:col-span-5" : "lg:col-span-12")}>
           <div>
             <div className="flex items-center justify-between mb-8">
               <h2 className="text-sm font-bold uppercase tracking-[0.3em]">The Manuscript</h2>
@@ -922,12 +936,12 @@ function ProjectView({ project, updateProject }: { project: Project, updateProje
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.95 }}
                     layout
-                    onClick={() => setActiveNoteId(note.id)}
+                    onClick={() => setActiveNoteId(activeNoteId === note.id ? null : note.id)}
                     className={cn(
-                      "group relative cursor-pointer rounded-3xl border border-ink/10 bg-white p-6 shadow-[0_18px_45px_rgba(15,23,42,0.06)] transition-all",
+                      "group relative cursor-pointer rounded-3xl border border-ink/10 bg-white p-6 shadow-[0_18px_45px_rgba(15,23,42,0.06)] transition-all overflow-hidden",
                       activeNoteId === note.id
                         ? "border-accent/40 shadow-[0_24px_65px_rgba(225,29,72,0.10)]"
-                        : "hover:border-ink/20"
+                        : "h-[220px] hover:border-ink/20"
                     )}
                   >
                     <button 
@@ -944,7 +958,7 @@ function ProjectView({ project, updateProject }: { project: Project, updateProje
                         Entry {project.notes.length - i} &bull; {new Date(note.createdAt).toLocaleDateString()}
                       </span>
                       <span className="text-[9px] font-bold uppercase tracking-[0.25em] text-ink/25">
-                        {activeNoteId === note.id ? 'Open' : 'Collapsed'}
+                        {activeNoteId === note.id ? 'Open' : 'Preview'}
                       </span>
                     </div>
 
@@ -966,15 +980,21 @@ function ProjectView({ project, updateProject }: { project: Project, updateProje
                         </p>
                       </motion.div>
                     ) : (
-                      <div className="space-y-4">
+                      <div className="flex h-[150px] flex-col justify-between gap-4">
                         {note.imageUrl && (
                           <div className="overflow-hidden rounded-2xl border border-ink/10 bg-ink/5">
                             <img src={note.imageUrl} alt="Manuscript Asset" className="h-32 w-full object-cover" />
                           </div>
                         )}
-                        <p className="line-clamp-4 text-sm font-serif italic leading-relaxed text-ink/65 whitespace-pre-wrap">
+                        <p className={cn(
+                          "text-sm font-serif italic leading-relaxed text-ink/65 whitespace-pre-wrap",
+                          note.imageUrl ? "line-clamp-2" : "line-clamp-5"
+                        )}>
                           {note.content}
                         </p>
+                        <span className="text-[10px] font-bold uppercase tracking-[0.25em] text-accent/70">
+                          Click to expand
+                        </span>
                       </div>
                     )}
                   </motion.article>
@@ -990,6 +1010,7 @@ function ProjectView({ project, updateProject }: { project: Project, updateProje
         </div>
 
         {/* Right Column: Generation & Kit */}
+        {showEditorialResultsColumn && (
         <div className="col-span-12 lg:col-span-7 lg:pl-12 lg:border-l border-ink/10">
           {/* Kit Display */}
           {loadingSection && (
@@ -1236,6 +1257,7 @@ function ProjectView({ project, updateProject }: { project: Project, updateProje
             </div>
           )}
         </div>
+        )}
       </div>
       ) : (
         <SpatialWorkbenchView 
