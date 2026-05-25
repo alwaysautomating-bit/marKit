@@ -328,6 +328,7 @@ function ProjectView({ project, updateProject }: { project: Project, updateProje
   const [messagingTarget, setMessagingTarget] = useState('all');
   const [assetTarget, setAssetTarget] = useState<TacticalAssetTarget>('socialMediaBio');
   const [showPodcastConfig, setShowPodcastConfig] = useState(false);
+  const [activeNoteId, setActiveNoteId] = useState<string | null>(project.notes[0]?.id ?? null);
   
   const [viewMode, setViewMode] = useState<'editorial' | 'spatial'>('editorial');
   const [logs, setLogs] = useState<string[]>(() => [
@@ -343,6 +344,17 @@ function ProjectView({ project, updateProject }: { project: Project, updateProje
 
   const resultRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (project.notes.length === 0) {
+      setActiveNoteId(null);
+      return;
+    }
+
+    if (!activeNoteId || !project.notes.some((note) => note.id === activeNoteId)) {
+      setActiveNoteId(project.notes[0].id);
+    }
+  }, [project.notes, activeNoteId]);
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -904,31 +916,68 @@ function ProjectView({ project, updateProject }: { project: Project, updateProje
             <div className="space-y-6">
               <AnimatePresence>
                 {project.notes.map((note, i) => (
-                  <motion.div 
+                  <motion.article 
                     key={note.id}
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.95 }}
-                    className="group relative pl-6 border-l-2 border-ink/10 hover:border-accent transition-colors pb-8"
+                    layout
+                    onClick={() => setActiveNoteId(note.id)}
+                    className={cn(
+                      "group relative cursor-pointer rounded-3xl border border-ink/10 bg-white p-6 shadow-[0_18px_45px_rgba(15,23,42,0.06)] transition-all",
+                      activeNoteId === note.id
+                        ? "border-accent/40 shadow-[0_24px_65px_rgba(225,29,72,0.10)]"
+                        : "hover:border-ink/20"
+                    )}
                   >
                     <button 
-                      onClick={() => handleDeleteNote(note.id)}
-                      className="absolute -left-3 top-0 bg-paper text-ink/20 hover:text-accent opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteNote(note.id);
+                      }}
+                      className="absolute left-4 top-4 text-ink/20 hover:text-accent opacity-0 group-hover:opacity-100 transition-opacity"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
-                    <span className="text-[9px] font-bold uppercase tracking-widest text-ink/30 block mb-2">
-                      Entry {project.notes.length - i} &bull; {new Date(note.createdAt).toLocaleDateString()}
-                    </span>
-                    {note.imageUrl && (
-                      <div className="mb-4 magazine-border overflow-hidden bg-ink/5">
-                        <img src={note.imageUrl} alt="Manuscript Asset" className="w-full h-auto grayscale hover:grayscale-0 transition-all duration-700" />
+                    <div className="flex items-start justify-between gap-4 mb-4 pr-6">
+                      <span className="text-[9px] font-bold uppercase tracking-widest text-ink/30 block">
+                        Entry {project.notes.length - i} &bull; {new Date(note.createdAt).toLocaleDateString()}
+                      </span>
+                      <span className="text-[9px] font-bold uppercase tracking-[0.25em] text-ink/25">
+                        {activeNoteId === note.id ? 'Open' : 'Collapsed'}
+                      </span>
+                    </div>
+
+                    {activeNoteId === note.id ? (
+                      <motion.div
+                        key={`${note.id}-expanded`}
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="overflow-hidden"
+                      >
+                        {note.imageUrl && (
+                          <div className="mb-5 overflow-hidden rounded-2xl border border-ink/10 bg-ink/5">
+                            <img src={note.imageUrl} alt="Manuscript Asset" className="w-full h-auto" />
+                          </div>
+                        )}
+                        <p className="text-sm font-serif italic leading-relaxed text-ink/80 whitespace-pre-wrap">
+                          {note.content}
+                        </p>
+                      </motion.div>
+                    ) : (
+                      <div className="space-y-4">
+                        {note.imageUrl && (
+                          <div className="overflow-hidden rounded-2xl border border-ink/10 bg-ink/5">
+                            <img src={note.imageUrl} alt="Manuscript Asset" className="h-32 w-full object-cover" />
+                          </div>
+                        )}
+                        <p className="line-clamp-4 text-sm font-serif italic leading-relaxed text-ink/65 whitespace-pre-wrap">
+                          {note.content}
+                        </p>
                       </div>
                     )}
-                    <p className="text-sm font-serif italic leading-relaxed text-ink/80 whitespace-pre-wrap">
-                      {note.content}
-                    </p>
-                  </motion.div>
+                  </motion.article>
                 ))}
               </AnimatePresence>
               {project.notes.length === 0 && (
