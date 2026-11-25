@@ -25,3 +25,7 @@ markitABLE is a browser-local workspace for turning raw notes into marketing str
 
 - No login, sync, or cross-device persistence is included in this mode.
 - Clearing browser storage will remove locally saved projects.
+
+## Brand & Marketing Asset Registry
+
+The master inventory of brand and marketing assets markitABLE is working toward producing lives in `src/registry/` (typed definitions, per-brand records, dependency/impact helpers). The progress tracker is [docs/ASSET_REGISTRY.md](docs/ASSET_REGISTRY.md) — regenerate it with `npm run registry:doc` after editing `src/registry/catalog.ts`.
